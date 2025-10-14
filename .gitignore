@@ -1,0 +1,12 @@
+minitorch.egg-info
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.class
+minitorch/__pycache__

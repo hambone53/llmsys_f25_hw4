@@ -1,5 +1,5 @@
-datasets==2.4.0
-embeddings==0.0.8
+datasets
+embeddings
 networkx==2.4
 plotly==4.14.3
 pydot==1.4.1

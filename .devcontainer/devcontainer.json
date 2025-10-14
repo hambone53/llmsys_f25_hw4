@@ -1,0 +1,38 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/python
+{
+	"name": "LLMSYS HW4 CUDA Development",
+	// Using a Dockerfile for CUDA setup
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": ".."
+	},
+
+	// GPU support
+	"runArgs": [
+		"--gpus=all"
+	],
+
+	// Set up VS Code extensions and settings
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"ms-toolsai.jupyter",
+				"nvidia.nsight-vscode-edition"
+			],
+			"settings": {
+				"python.defaultInterpreterPath": "/usr/local/bin/python",
+				"python.linting.enabled": true,
+				"python.linting.mypyEnabled": true
+			}
+		}
+	},
+
+	// Run post-creation setup commands
+	"postCreateCommand": "bash .devcontainer/postCreateCommand.sh",
+	
+	// Use non-root user
+	"remoteUser": "vscode"
+}
