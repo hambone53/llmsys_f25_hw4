@@ -44,8 +44,11 @@ class MultiHeadAttention(Module):
         self.causal    = causal
         self.attn_hidden_dim = n_embd // n_head
 
-        # COPY FROM ASSIGN2_4
-        raise NotImplementedError
+        self.q_projection = Linear(n_embd, n_embd, bias=bias, backend=backend)
+        self.k_projection = Linear(n_embd, n_embd, bias=bias, backend=backend)
+        self.v_projection = Linear(n_embd, n_embd, bias=bias, backend=backend)
+        self.out_projection = Linear(n_embd, n_embd, bias=bias, backend=backend)
+        self.dropout = Dropout(p_dropout)
 
     def create_causal_mask(self, bs, nh, seq_len):
         """
@@ -68,8 +71,31 @@ class MultiHeadAttention(Module):
         """
         batch_size, seq_len, n_embd = x.shape
         
-        # COPY FROM ASSIGN2_4
-        raise NotImplementedError
+        # Flatten batch and sequence dimensions for linear projections
+        x_flat = x.view(batch_size * seq_len, n_embd)
+        
+        # Apply projections
+        q_flat = self.q_projection(x_flat)
+        k_flat = self.k_projection(x_flat)
+        v_flat = self.v_projection(x_flat)
+        
+        # Reshape to separate head dimension
+        # Shape: (batch_size, seq_len, n_head, attn_hidden_dim)
+        q_flat = q_flat.view(batch_size, seq_len, n_embd)
+        k_flat = k_flat.view(batch_size, seq_len, n_embd)
+        v_flat = v_flat.view(batch_size, seq_len, n_embd)
+        q = q_flat.view(batch_size, seq_len, self.n_head, self.attn_hidden_dim)
+        k = k_flat.view(batch_size, seq_len, self.n_head, self.attn_hidden_dim)
+        v = v_flat.view(batch_size, seq_len, self.n_head, self.attn_hidden_dim)
+        
+        # Permute to get shape: (batch_size, n_head, seq_len, attn_hidden_dim)
+        q = q.permute(0, 2, 1, 3).contiguous()
+        k = k.permute(0, 2, 1, 3).contiguous()
+        v = v.permute(0, 2, 1, 3).contiguous()
+        
+        # Transpose k for matrix multiplication
+        # Shape: (batch_size, n_head, attn_hidden_dim, seq_len)
+        kT = k.permute(0, 1, 3, 2).contiguous()
         
         return q, kT, v
 
@@ -95,12 +121,32 @@ class MultiHeadAttention(Module):
         result = None
         
         if not self.use_fused_kernel:
-            # COPY FROM ASSIGN2_4
-            raise NotImplementedError
-        else:
             # BEGIN ASSIGN3_3
-            raise NotImplementedError
+            scale = (self.attn_hidden_dim ** -0.5)
+            scores = q.__matmul__(kT) * scale
+
+            if self.causal:
+                M = self.create_causal_mask(1, 1, queries_len) #TODO: need to verify mask size.
+                scores = scores + M
+
+            p_attn = softmax(scores, dim=3) # Need to soft max over the sequency length dim 3
+
+            if self.dropout is not None:
+                p_attn = self.dropout(p_attn)
+
+            attn = p_attn.__matmul__(v)
+
+            # Reshape back to original dimensions as we are now in [batch, n_head, queries_len, self.attn_hidden_dim]
+            attn = attn.permute(0, 2, 1, 3).contiguous()  # [batch, queries_len, n_head, self.attn_hidden_dim]
+            attn = attn.view(batch_size, queries_len, self.n_embd)
+        
+            # Apply output projection
+            attn_flatten = attn.view(batch_size * queries_len, self.n_embd)
+            result = self.out_projection(attn_flatten)
+            result = result.view(batch_size, queries_len, self.n_embd)
             # END ASSIGN3_3
+        else:
+            raise NotImplementedError
 
         return result
 
@@ -114,8 +160,9 @@ class MultiHeadAttention(Module):
             output : Tensor of shape (batch_size, seq_len, embedding_dim)
         """
         batch_size, seq_len, n_embd = x.shape
-        # COPY FROM ASSIGN2_4
-        raise NotImplementedError
+        q, kT, v = self.project_to_query_key_value(x)
+        result = self.self_attention(q, kT, v)
+        return result
 
 
 class FeedForward(Module):
@@ -134,8 +181,9 @@ class FeedForward(Module):
             linear_out : second linear layer
             dropout    : dropout layer
         """
-        # COPY FROM ASSIGN2_4
-        raise NotImplementedError
+        self.linear_in = Linear(n_embd, middle_dim, bias=bias, backend=backend)
+        self.linear_out = Linear(middle_dim, n_embd, bias=bias, backend=backend)
+        self.dropout = Dropout(p_dropout=p_dropout)
 
     def forward(self, x):
         """A FFN Module in a Pre-LN Transformer with GELU Activation and dropout.
@@ -148,8 +196,12 @@ class FeedForward(Module):
         """
         batch_size, seq_len, n_embd = x.shape
 
-        # COPY FROM ASSIGN2_4
-        raise NotImplementedError
+        x_flattened = x.view(batch_size * seq_len, n_embd)
+        hidden_flat = self.linear_in(x_flattened)
+        hidden_flat = GELU(hidden_flat)
+        hidden_flat = self.dropout(hidden_flat)
+        out = self.linear_out(hidden_flat)
+        out = out.view(batch_size, seq_len, n_embd)
 
         return x
 
@@ -179,10 +231,10 @@ class TransformerLayer(Module):
 
         self.use_fused_kernel = use_fused_kernel
         if not self.use_fused_kernel:
-            # COPY FROM ASSIGN2_4
-            # self.ln_1
-            # self.ln_2
-            raise NotImplementedError
+            self.ln_1 = LayerNorm1d(n_embd, eps=ln_eps, backend=backend)
+            self.ln_2 = LayerNorm1d(n_embd, eps=ln_eps, backend=backend)
+            self.attention = MultiHeadAttention(n_embd=n_embd, n_head=n_head, p_dropout=p_dropout, bias=bias, backend=backend)
+            self.ff = FeedForward(n_embd=n_embd, p_dropout=p_dropout, bias=bias, backend=backend)
         else:
             # BEGIN ASSIGN3_3
             raise NotImplementedError
@@ -197,8 +249,22 @@ class TransformerLayer(Module):
         batch_size, seq_len, x_dim = x.shape
         
         if not self.use_fused_kernel:
-            # COPY FROM ASSIGN2_4
-            raise NotImplementedError
+            ### BEGIN YOUR SOLUTION
+            residual = x
+            x = x.view(batch_size * seq_len, n_embd) #Flatten out so do the layer norm which expects 2D
+            x = self.ln_1(x)
+            x = x.view(batch_size, seq_len, n_embd) #Unflatten to be able to add
+            x = x.view(batch_size, seq_len, n_embd)
+            x = self.attention(x)
+            x = x + residual
+
+            # Second residual connection with feed forward
+            residual = x
+            x = x.view(batch_size * seq_len, n_embd) # Flatten out for layer norm
+            x = self.ln_2(x)
+            x = x.view(batch_size, seq_len, n_embd)
+            x = self.ff(x)
+            x = x + residual
         else:
             # BEGIN ASSIGN3_3
             raise NotImplementedError
@@ -260,9 +326,17 @@ class DecoderLM(Module):
 
         self.use_fused_kernel = use_fused_kernel
         if not self.use_fused_kernel:
-            # COPY FROM ASSIGN2_4
-            # self.ln                  = 
-            raise NotImplementedError
+            ### BEGIN ASSIGN3_3
+            self.token_embeddings = Embedding(n_vocab, n_embd, backend=backend)
+            self.position_embeddings = Embedding(n_positions, n_embd, backend=backend)
+            self.t_layer_1 = TransformerLayer(n_embd, n_head, p_dropout, ln_eps, bias=bias, backend=backend)
+            self.t_layer_2 = TransformerLayer(n_embd, n_head, p_dropout, ln_eps, bias=bias, backend=backend)
+            self.t_layer_3 = TransformerLayer(n_embd, n_head, p_dropout, ln_eps, bias=bias, backend=backend)
+            self.t_layer_4 = TransformerLayer(n_embd, n_head, p_dropout, ln_eps, bias=bias, backend=backend)
+            self.dropout = Dropout(p_dropout)
+            self.ln = LayerNorm1d(n_embd, ln_eps, backend=backend)
+            self.lm_head = Linear(n_embd, n_vocab, bias=bias, backend=backend) 
+            ### END ASSIGN3_3
         else:
             # BEGIN ASSIGN3_3
             raise NotImplementedError
@@ -281,8 +355,30 @@ class DecoderLM(Module):
         pos = tensor([i for i in range(seq_len)], backend=self.backend).view(1, seq_len)
 
         if not self.use_fused_kernel:
-            # COPY FROM ASSIGN2_4
-            raise NotImplementedError
+            # 1. Get token embeddings of shape (batch_size, seq_len, n_embd)
+            token_emb = self.token_embeddings(idx)
+            # 2. Create positional embeddings of shape (1, seq_len, n_embd):
+            pos_ids = pos
+            pos_emb = self.position_embeddings(pos_ids)
+            # 3. Add token and positional embeddings
+            x = token_emb + pos_emb
+
+            # 4. Apply dropout
+            x = self.dropout(x)
+
+            # 5. Pass through transformer layers (t_layer_1 to t_layer_4)
+            x = self.t_layer_1(x)
+            x = self.t_layer_2(x)
+            x = self.t_layer_3(x)
+            x = self.t_layer_4(x)
+
+            # 6. Apply final layer normalization x should be batch_size, seq_len, n_embd shape.
+            x_flat = x.view(batch_size * seq_len, self.n_embd)
+            x_flat = self.ln(x_flat)
+
+            # 7. Project to vocabulary size using lm_head
+            logit_flat = self.lm_head(x_flat)
+            x = logit_flat.view(batch_size, seq_len, self.n_vocab)
         else:
             # BEGIN ASSIGN3_3
             raise NotImplementedError

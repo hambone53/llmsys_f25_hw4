@@ -382,9 +382,10 @@ class MatMul(Function):
 class Attn_Softmax(Function):
     @staticmethod
     def forward(ctx: Context, inp: Tensor, mask: Tensor) -> Tensor:
-      #   BEGIN ASSIGN4_1_1
-      raise NotImplementedError("Need to implement for Assignment 3")
-      #   END ASSIGN4_1_1
+        #   BEGIN ASSIGN4_1_1
+        ctx.save_for_backward(inp, mask)
+        return inp.f.attn_softmax_fw(inp, mask)
+        #   END ASSIGN4_1_1
 
     @staticmethod
     def backward(ctx: Context, out_grad: Tensor) -> Tensor:

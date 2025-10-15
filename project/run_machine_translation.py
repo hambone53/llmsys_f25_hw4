@@ -19,24 +19,76 @@ from minitorch import DecoderLM
 from minitorch.cuda_kernel_ops import CudaKernelOps
 
 
-def get_dataset(dataset_name, model_max_length):
+def get_dataset(dataset_name='bbaaaa/iwslt14-de-en-preprocess', model_max_length=40, use_local=True):
     """
-    Obtrain IWSLT (de-en) dataset.
-    """
-    dataset = {
-        split: datasets.load_dataset(dataset_name, split=split)['translation']
-        for split in ['train', 'validation', 'test']
-    }
-    src_key, tgt_key = 'de', 'en'
+    Load and preprocess IWSLT (de-en) dataset from local files or HuggingFace.
+    
+    Args:
+        dataset_name (str): Name of the dataset to load
+        model_max_length (int): Maximum sequence length for filtering examples
+        use_local (bool): Whether to use locally stored dataset files
 
+    Returns:
+        tuple: (dataset, src_key, tgt_key) where:
+            - dataset: Dictionary with 'train', 'validation', 'test' splits
+            - src_key (str): Source language key ('de')
+            - tgt_key (str): Target language key ('en')
+    """
+    src_key, tgt_key = 'de', 'en'
+    
+    if use_local:
+        # Define local dataset path and split mapping
+        local_dataset_path = f'/workspaces/llmsys_f25_hw3/datasets/bbaaaa/iwslt14-de-en-preprocess/de-en'
+        split_mapping = {'train': 'train', 'valid': 'validation', 'test': 'test'}
+        
+        # Load data from local files
+        dataset = {}
+        for file_split, code_split in split_mapping.items():
+            src_path = f"{local_dataset_path}/{file_split}.{src_key}"
+            tgt_path = f"{local_dataset_path}/{file_split}.{tgt_key}"
+            
+            # Check if files exist
+            if not os.path.exists(src_path) or not os.path.exists(tgt_path):
+                print(f"Warning: Files not found at {src_path} or {tgt_path}")
+                print("Falling back to HuggingFace dataset loading")
+                use_local = False
+                break
+            
+            # Read files
+            with open(src_path, 'r', encoding='utf-8') as src_file, open(tgt_path, 'r', encoding='utf-8') as tgt_file:
+                src_lines = src_file.readlines()
+                tgt_lines = tgt_file.readlines()
+                
+                # Create examples
+                examples = []
+                for src_line, tgt_line in zip(src_lines, tgt_lines):
+                    example = {src_key: src_line.strip(), tgt_key: tgt_line.strip()}
+                    examples.append(example)
+                
+                dataset[code_split] = examples
+    
+    # Use HuggingFace if local loading failed or wasn't requested
+    if not use_local:
+        try:
+            dataset = {
+                split: datasets.load_dataset(dataset_name, split=split)['translation']
+                for split in ['train', 'validation', 'test']
+            }
+        except Exception as e:
+            print(f"Error loading dataset from HuggingFace: {e}")
+            print("Please check your internet connection or use local files")
+            raise
+
+    # Filter by length
     dataset = {
         split: [
             example for example in dataset[split]
-            if len(example[src_key].split()) + len(example[tgt_key].split()) < model_max_length
+            if len(example[src_key].split()) + len(
+                example[tgt_key].split()) < model_max_length
         ] for split in dataset.keys()
     }
 
-    dataset['test'] = dataset['test'][:100]             # 6750
+    dataset['test'] = dataset['test'][:100]  # Limit test set size
 
     print(json.dumps(
         {'data_size': {split: len(dataset[split]) for split in dataset.keys()}},
@@ -112,6 +164,7 @@ def collate_batch(
     between the source (weight = 0) and target (weight = 1) tokens for loss
     """
     token_ids, tgt_token_mask = [], []
+    max_length = model_max_length
     pad_token_id = tokenizer.vocab['<pad>']
     for example in examples:
         # token_ids_src = <de_token_ids> + <de_eos_id>
@@ -121,16 +174,31 @@ def collate_batch(
         token_ids_tgt = tokenizer(
             f'{example[tgt_key]}<eos_{tgt_key}>')['input_ids']
 
-        # COPY FROM ASSIGN2_5
-        raise NotImplementedError("Collate Function Not Implemented Yet")
+        example_token_ids = token_ids_src + token_ids_tgt
+        example_tgt_token_mask = (
+                [0] * len(token_ids_src) + [1] * len(token_ids_tgt))
+        example_token_ids = example_token_ids[:max_length]
+        example_tgt_token_mask = example_tgt_token_mask[:max_length]
+        pad_ids = [pad_token_id] * (max_length - len(example_token_ids))
 
-    # COPY FROM ASSIGN2_5
-    raise NotImplementedError("Collate Function Not Implemented Yet")
+        token_ids.append(example_token_ids + pad_ids)
+        tgt_token_mask.append(example_tgt_token_mask + [0] * len(pad_ids))
+
+    token_ids = np.array(token_ids)
+    tgt_token_mask = np.array(tgt_token_mask)
+
+    input_ids = token_ids[:, :-1]
+    labels    = token_ids[:, 1:]
+    label_token_weights = tgt_token_mask[:, 1:]
+
+    input_ids = minitorch.tensor_from_numpy(input_ids, backend=backend)
+    labels    = minitorch.tensor_from_numpy(labels, backend=backend)
+    label_token_weights = minitorch.tensor_from_numpy(label_token_weights, backend=backend)
 
     return {
-        'input_ids': minitorch.zeros((len(examples), model_max_length)),
-        'labels': minitorch.zeros((len(examples), model_max_length)),
-        'label_token_weights': minitorch.zeros((len(examples), model_max_length))
+        'input_ids': input_ids,
+        'labels': labels,
+        'label_token_weights': label_token_weights
     }
 
 
@@ -150,10 +218,21 @@ def loss_fn(batch, model):
     idx.requires_grad_(True)
     
     logits = model(idx=idx)
-    batch_size, seq_len, vocab_size = logits.shape
-    
-    # COPY FROM ASSIGN2_5
-    raise NotImplementedError("Loss Function Not Implemented Yet")
+    bs, l, c = logits.shape
+    logits = logits.view(bs * l, c)
+    targets = batch['labels'].view(bs * l)
+    label_token_weights = batch['label_token_weights'].view(bs * l)
+
+    targets.requires_grad_(True)
+    # print("start calculating loss")
+    # import pdb
+    # pdb.set_trace()
+    loss = minitorch.nn.softmax_loss(
+        logits=logits,
+        target=targets
+    )
+
+    return ((loss * label_token_weights).sum() / label_token_weights.sum())
 
 
 def train(model, optimizer, examples, n_samples, collate_fn, batch_size, desc):
@@ -232,7 +311,9 @@ def main(dataset_name='bbaaaa/iwslt14-de-en-preprocess',
     optimizer = minitorch.Adam(model.parameters(), lr=learning_rate)
 
     dataset, src_key, tgt_key = get_dataset(
-        dataset_name=dataset_name, model_max_length=model_max_length)
+        dataset_name=dataset_name, model_max_length=model_max_length, 
+        use_local=True # Set to False if you want to use HuggingFace instead
+    )
 
     tokenizer = get_tokenizer(
         examples=dataset['train'],

@@ -15,6 +15,10 @@ from .tensor import Tensor
 
 from typing import Any, Dict, Optional, Sequence, Tuple
 
+def RParam(*shape, backend: TensorBackend):
+    r = 0.1 * (rand(shape, backend=backend) - 0.5)
+    return Parameter(r)
+
 
 class Embedding(Module):
     def __init__(self, num_embeddings: int, embedding_dim: int, backend: TensorBackend):
@@ -33,8 +37,8 @@ class Embedding(Module):
         self.num_embeddings = num_embeddings # Vocab size
         self.embedding_dim  = embedding_dim  # Embedding Dimension
         
-        # COPY FROM ASSIGN2_3
-        raise NotImplementedError
+        weights_array = np.random.default_rng().standard_normal((num_embeddings, embedding_dim))
+        self.weights = Parameter(tensor_from_numpy(weights_array, backend=backend, requires_grad=True))
     
     def forward(self, x: Tensor):
         """Maps word indices to one-hot vectors, and projects to embedding vectors.
@@ -47,8 +51,11 @@ class Embedding(Module):
         """
         bs, seq_len = x.shape
         
-        # COPY FROM ASSIGN2_3
-        raise NotImplementedError
+        x_one_hot = one_hot(x, self.num_embeddings)
+        flattened_one_hot = x_one_hot.view(bs * seq_len, self.num_embeddings) #Need to flaten out 3rd Dimension so we can 2d x 2d matrix multiply
+        out = flattened_one_hot.__matmul__(self.weights.value)
+        out = out.view(bs, seq_len, self.embedding_dim)
+        return out
 
     
 class Dropout(Module):
@@ -70,8 +77,11 @@ class Dropout(Module):
         Returns: 
             output : Tensor of shape (*)
         """
-        # COPY FROM ASSIGN2_3
-        raise NotImplementedError
+        if self.training and self.p_dropout > 0:
+            mask = np.random.binomial(1, 1 - self.p_dropout, size=x.shape)
+            mask_tensor = tensor_from_numpy(mask, backend=x.backend)
+            return x * mask_tensor / (1 - self.p_dropout)
+        return x
 
 
 class Linear(Module):
@@ -90,8 +100,11 @@ class Linear(Module):
         """
         self.out_size = out_size
         
-        # COPY FROM ASSIGN2_3
-        raise NotImplementedError
+        self.weights = RParam(in_size, out_size, backend=backend)
+        if bias:
+            self.bias = RParam(out_size, backend=backend)
+        else:
+            self.bias =  None
 
     def forward(self, x: Tensor):
         """Applies a linear transformation to the incoming data.
@@ -104,8 +117,13 @@ class Linear(Module):
         """
         batch, in_size = x.shape
         
-        # COPY FROM ASSIGN2_3
-        raise NotImplementedError
+        x = x.view(batch, in_size)
+        weights = self.weights.value.view(in_size, self.out_size)
+        out = x.__matmul__(weights)
+        out = out.view(batch,self.out_size)
+        if self.bias is not None:
+            out = out.__add__(self.bias.value)
+        return out
 
 
 class LayerNorm1d(Module):
@@ -124,8 +142,8 @@ class LayerNorm1d(Module):
         self.dim = dim
         self.eps = eps
         
-        # COPY FROM ASSIGN2_3
-        raise NotImplementedError
+        self.weights = Parameter(ones((dim,), backend=backend))
+        self.bias = Parameter(zeros((dim,), backend=backend))
 
     def forward(self, x: Tensor) -> Tensor:
         """Applies Layer Normalization over a mini-batch of inputs. 
@@ -140,5 +158,7 @@ class LayerNorm1d(Module):
         """
         batch, dim = x.shape
         
-        # COPY FROM ASSIGN2_3
-        raise NotImplementedError
+        mean = x.mean(1)
+        var = x.var(1)
+        x_norm = (x - mean) / ((var + self.eps) ** 0.5)
+        return self.weights.value * x_norm + self.bias.value
