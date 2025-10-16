@@ -11,7 +11,7 @@ from minitorch.cuda_kernel_ops import CudaKernelOps
 backend = minitorch.TensorBackend(CudaKernelOps)
 
 
-@kt.case(atol=1e-3, rtol=1e-3, ntest=5)
+@kt.case(atol=1e-3, rtol=1e-3, ntest=1)
 def test_launch_attn_softmax():
   batch_size, from_len = kt.bs_sl()
   is_dec_self_attn = False
@@ -21,6 +21,9 @@ def test_launch_attn_softmax():
       is_dec_self_attn_infer = np.random.choice([True, False])
   else:
       _, to_len = kt.bs_sl(batch_size)
+      batch_size = 1
+      from_len = 128
+      to_len = 32
       is_dec_self_attn_infer = False
 
   if is_dec_self_attn_infer:

@@ -15,6 +15,9 @@ nvidia-smi
 echo "===== Step 4: Verifying PyTorch CUDA Setup ====="
 python -c "import torch; print('PyTorch Version:', torch.__version__); print('CUDA Available:', torch.cuda.is_available()); print('CUDA Version:', torch.version.cuda)"
 
+echo "===== Step 4.1: Installing PyCUDA ====="
+pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org pycuda
+
 echo "===== Step 5: Compiling CUDA Kernels ====="
 bash compile_cuda.sh
 
