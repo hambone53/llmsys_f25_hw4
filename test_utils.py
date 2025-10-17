@@ -161,8 +161,8 @@ class TestDecorator(object):
         passed = True
         assert len(tlist1) == len(tlist2)
         for i in range(len(tlist1)):
-            t1 = tlist1[i]
-            t2 = tlist2[i]
+            t1 = tlist1[i].cpu()
+            t2 = tlist2[i].cpu()
             # fast allclose
             res = torch.allclose(
                 t1.flatten(), t2.flatten(), rtol=rtol, atol=atol, equal_nan=False
