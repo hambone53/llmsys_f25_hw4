@@ -138,7 +138,8 @@ def backpropagate(variable: Variable, deriv: Any) -> None:
     ordered_vars = topological_sort(variable)
 
     for var in ordered_vars:
-        derivatives[var.unique_id] = 0.0
+        if var.unique_id not in derivatives:
+            derivatives[var.unique_id] = 0.0
 
     for var in ordered_vars:
         if var.unique_id not in derivatives:

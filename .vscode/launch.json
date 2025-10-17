@@ -13,6 +13,19 @@
             },
             "justMyCode": false,
             "stopOnEntry": false
+        },
+        {
+            "name": "Debug test_softmax_bw.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/kernel_tests/test_softmax_bw.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": false,
+            "stopOnEntry": false
         }
     ]
 }
