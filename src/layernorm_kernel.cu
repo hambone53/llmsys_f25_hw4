@@ -46,17 +46,50 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   
   // Step 1
   float l_sum = 0;
+  float l_sum_square = 0;
   const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + blockIdx.x * hidden_size;  
   for (uint idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     float4 val = inp_f4[idx];
     l_sum += val.x + val.y + val.z + val.w;
+    l_sum_square += val.x * val.x + val.y * val.y + val.z * val.z + val.w * val.w;
   }
 
   // Step 2
+  float mean_dim = float(hidden_size) * 4.f;
+  float reduce_val[2] = {l_sum, l_sum_square};
+  __shared__ float s_mean, s_var;
+
+  blockReduce<ReduceType::kSum, 2>(reduce_val); //Reduce the sums across thread block
+
+  if (threadIdx.x == 0) {
+    s_mean = reduce_val[0] / mean_dim;
+
+    if (means != nullptr) {
+      means[blockIdx.x] = s_mean;
+    }
+    
+    s_var = reduce_val[1] / mean_dim - s_mean * s_mean + LN_EPSILON; //mu(x^2) - mu(x)^2 - epsilon
+    vars[blockIdx.x] = s_var;
+    s_var = rsqrtf(s_var);
+  }
+
+  __syncthreads();
 
   // Step 3
-  
-  assert(false && "Not Implemented");
+  float4 *ln_res_f4 = reinterpret_cast<float4 *>(ln_res) + blockIdx.x * hidden_size;
+
+  for (uint idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+    float4 scale_f4 = __ldg(reinterpret_cast<const float4 *>(scale) + idx);
+    float4 bias_f4 = __ldg(reinterpret_cast<const float4 *>(bias) + idx);
+    float4 val = inp_f4[idx];
+
+    val.w = (val.w - s_mean) * s_var * scale_f4.w + bias_f4.w;
+    val.x = (val.x - s_mean) * s_var * scale_f4.x + bias_f4.x;
+    val.y = (val.y - s_mean) * s_var * scale_f4.y + bias_f4.y;
+    val.z = (val.z - s_mean) * s_var * scale_f4.z + bias_f4.z;
+
+    ln_res_f4[idx] = val;
+  }
   /// END ASSIGN4_2_1
 }
 
@@ -90,7 +123,7 @@ void launch_layernorm(float *ln_res, float *vars, float *means,
   cudaMemcpy(d_bias, bias, bias_size, cudaMemcpyHostToDevice);
 
   // For using float4
-  hidden_dim >>= 2;
+  hidden_dim >>= 2; //Divide hidden_dim by 4 so that we can process with float4 (4 at a time via vectorization)
   int nthread = min(((hidden_dim + 31) / 32) * 32, MAX_THREADS);
   dim3 grid_dim(batch_size);
   dim3 block_dim(nthread);

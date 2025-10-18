@@ -431,9 +431,42 @@ class CudaKernelOps(TensorOps):
 
     @staticmethod
     def layernorm_fw(inp: Tensor, gamma: Tensor, beta: Tensor):
-      #   BEGIN ASSIGN4_2_1
-      raise("Not implemented")
-      #   END ASSIGN4_2_1
+        #   BEGIN ASSIGN4_2_1
+        stream = torch.cuda.current_stream().cuda_stream
+        batch_size, hidden_size = inp.shape # Assume batch_size and seq_len already flattened.
+
+        # Create tensors for return
+        ln_res = inp.zeros(inp.shape)
+        vars = inp.zeros((batch_size,))
+        means = inp.zeros((batch_size,))
+
+        lib_layernorm.launch_layernorm.argtypes = [
+            np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+            np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+            np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+            np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+            np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+            np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_void_p
+        ]
+        lib_layernorm.launch_layernorm.restype = None
+
+        lib_layernorm.launch_layernorm(
+            ln_res._tensor._storage,
+            vars._tensor._storage,
+            means._tensor._storage,
+            inp._tensor._storage,
+            gamma._tensor._storage,
+            beta._tensor._storage,
+            batch_size,
+            hidden_size,
+            stream
+        )
+
+        return ln_res, vars, means
+        #   END ASSIGN4_2_1
       
     @staticmethod
     def layernorm_bw(out_grad: Tensor, inp: Tensor, gamma: Tensor, beta: Tensor, var: Tensor, mean: Tensor):
